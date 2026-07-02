@@ -1,0 +1,19 @@
+# Test-specific docker-compose overlay
+# Usage: docker-compose -f docker-compose.test.yml up -d
+services:
+  db-test:
+    image: postgres:16-alpine
+    container_name: recruitment-db-test
+    environment:
+      POSTGRES_USER: recruitment_test
+      POSTGRES_PASSWORD: recruitment_test
+      POSTGRES_DB: recruitment_platform_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recruitment_test -d recruitment_platform_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

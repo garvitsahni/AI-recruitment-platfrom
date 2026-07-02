@@ -1,0 +1,121 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  ECS_CLUSTER: recruitment-staging
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: tag
+        run: echo "tag=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js for migrations
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Pull secrets from AWS Secrets Manager
+        id: secrets
+        run: |
+          DB_URL=$(aws secretsmanager get-secret-value --secret-id recruitment/staging/database-url --query SecretString --output text)
+          echo "::add-mask::$DB_URL"
+          echo "DATABASE_URL=$DB_URL" >> $GITHUB_ENV
+
+      - name: Run Prisma migrations
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      - name: Deploy backend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service recruitment-backend \
+            --force-new-deployment \
+            --task-definition recruitment-backend-staging
+
+      - name: Deploy AI service to ECS
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service recruitment-ai-service \
+            --force-new-deployment \
+            --task-definition recruitment-ai-service-staging
+
+      - name: Deploy frontend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service recruitment-frontend \
+            --force-new-deployment \
+            --task-definition recruitment-frontend-staging
+
+      - name: Wait for deployment stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services recruitment-backend recruitment-ai-service recruitment-frontend
+        timeout-minutes: 10
+
+      - name: Run smoke tests
+        run: |
+          STAGING_URL="${{ secrets.STAGING_URL }}"
+          # Backend health
+          curl -f "${STAGING_URL}:3001/health" || exit 1
+          # AI service health
+          curl -f "${STAGING_URL}:8000/health" || exit 1
+          echo "Smoke tests passed"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed — initiating rollback"
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service recruitment-backend \
+            --force-new-deployment \
+            --task-definition recruitment-backend-staging-previous || true
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service recruitment-ai-service \
+            --force-new-deployment \
+            --task-definition recruitment-ai-service-staging-previous || true
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service recruitment-frontend \
+            --force-new-deployment \
+            --task-definition recruitment-frontend-staging-previous || true
