@@ -137,4 +137,16 @@ describe('excelImport.parseExcelBuffer', () => {
 
     await expect(parseExcelBuffer(buffer, '1900')).rejects.toThrow();
   });
+
+  test('should return validation error for unreadable workbook bytes', async () => {
+    await expect(parseExcelBuffer(Buffer.from('not an excel file'), '1900', 'Applicants.xlsx'))
+      .rejects
+      .toThrow('Unable to read Excel workbook');
+  });
+
+  test('should return validation error for legacy xls files', async () => {
+    await expect(parseExcelBuffer(Buffer.from('legacy excel bytes'), '1900', 'Applicants.xls'))
+      .rejects
+      .toThrow('Legacy .xls files are not supported');
+  });
 });

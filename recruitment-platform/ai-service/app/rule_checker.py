@@ -198,20 +198,8 @@ async def check_rules_against_candidate(
     
     for rule in checklist_rules:
         if rule.requires_document:
-            # Check if document exists in manifest
             doc_type = rule.expected_document_type
-            doc_entry = next((d for d in attachment_manifest.attachments if d.document_type == doc_type), None)
-            
-            if not doc_entry:
-                results.append(RuleResult(
-                    rule=rule.rule_text,
-                    rule_type=rule.rule_type,
-                    status=RuleStatus.MISSING_DOCUMENT,
-                    verification_details={"error": f"Required document {doc_type} not found in manifest"}
-                ))
-                continue
-                
-            # Fetch text and use LLM
+
             if fetch_document_text_fn:
                 try:
                     doc_text, doc_id = await fetch_document_text_fn(doc_type)
@@ -221,13 +209,16 @@ async def check_rules_against_candidate(
                         continue
                 except Exception as e:
                     logger.error("fetch_document_error", error=str(e))
-                    
-            # Fallback if we can't get text or fetch fn isn't provided
+
+            doc_entry = next((d for d in attachment_manifest.attachments if d.document_type == doc_type), None)
+            status = RuleStatus.UNVERIFIED if doc_entry else RuleStatus.MISSING_DOCUMENT
+            message = "Document text unavailable for verification" if doc_entry else f"Required document {doc_type} not found"
+
             results.append(RuleResult(
                 rule=rule.rule_text,
                 rule_type=rule.rule_type,
-                status=RuleStatus.UNVERIFIED,
-                verification_details={"error": "Document text unavailable for verification"}
+                status=status,
+                verification_details={"error": message}
             ))
             
         else:

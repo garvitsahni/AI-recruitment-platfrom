@@ -1,3 +1,4 @@
+import base64
 import structlog
 from fastapi import APIRouter
 from app.models.form_data import FormParseRequest, FormParseResponse
@@ -13,9 +14,11 @@ async def parse_form_route(request: FormParseRequest):
     
     Per SKILL.md §6: deterministic table extraction, not LLM reading.
     """
+    pdf_bytes = base64.b64decode(request.pdf_base64) if request.pdf_base64 else None
     parsed_data, manifest, version = await parse_application_form(
-        request.pdf_s3_key, 
-        request.reference_number
+        request.pdf_s3_key,
+        request.reference_number,
+        pdf_bytes=pdf_bytes,
     )
     
     return FormParseResponse(

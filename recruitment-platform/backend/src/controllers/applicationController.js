@@ -12,11 +12,24 @@ function detectDocumentType(fileName, mimeType) {
   const normalizedName = (fileName || '').toLowerCase();
   const normalizedMimeType = (mimeType || '').toLowerCase();
 
-  if (normalizedName.includes('application') || normalizedName.includes('form')) return 'APPLICATION_FORM';
-  if (normalizedName.includes('resume') || normalizedName.includes('cv')) return 'RESUME';
-  if (normalizedName.includes('aadhaar') || normalizedName.includes('passport') || normalizedName.includes('pan')) return 'IDENTITY_PROOF';
-  if (normalizedName.includes('degree') || normalizedName.includes('marksheet') || normalizedName.includes('certificate')) return 'ACADEMIC_DOCUMENT';
-  if (normalizedMimeType === 'application/pdf') return 'APPLICATION_FORM';
+  if (normalizedName.includes('application') || normalizedName.includes('form')) {
+    return 'APPLICATION_FORM';
+  }
+  if (normalizedName.includes('resume') || normalizedName.includes('cv')) {
+    return 'RESUME';
+  }
+  if (normalizedName.includes('aadhaar') || normalizedName.includes('passport') || normalizedName.includes('pan')) {
+    return 'IDENTITY_PROOF';
+  }
+  if (normalizedName.includes('experience') || normalizedName.includes('employment') || normalizedName.includes('relieving') || normalizedName.includes('service')) {
+    return 'EXPERIENCE_CERTIFICATE';
+  }
+  if (normalizedName.includes('degree') || normalizedName.includes('marksheet') || normalizedName.includes('certificate')) {
+    return 'ACADEMIC_DOCUMENT';
+  }
+  if (normalizedMimeType === 'application/pdf') {
+    return 'APPLICATION_FORM';
+  }
 
   return 'SUPPORTING_DOCUMENT';
 }
@@ -117,7 +130,7 @@ async function importFromExcel(req, res, next) {
     const buffer = req.file.buffer;
     const fileName = req.file.originalname;
 
-    const { rows, failedRows, warnings, totalRows } = await parseExcelBuffer(buffer, job.postingCode);
+    const { rows, failedRows, warnings, totalRows } = await parseExcelBuffer(buffer, job.postingCode, fileName);
     if (totalRows === 0) throw new ValidationError('Excel file contains no data rows');
 
     const excelKey = storage.generateKey('application', job.postingCode, `imports/${fileName}`);

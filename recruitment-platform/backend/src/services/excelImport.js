@@ -3,7 +3,7 @@
 const ExcelJS = require('exceljs');
 const { logger } = require('../utils/logger');
 const { ValidationError } = require('../utils/errors');
-const { parse: parseRefNum, extractPostingCode } = require('./referenceNumber');
+const { parse: parseRefNum } = require('./referenceNumber');
 
 /**
  * Excel Import Service.
@@ -29,11 +29,45 @@ const REQUIRED_COLUMNS = ['reference_number'];
 /**
  * Known column mappings (flexible header detection).
  */
+function normalizeCellValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value !== 'object') {
+    return value;
+  }
+
+  if (value.text !== undefined) {
+    return value.text;
+  }
+  if (value.result !== undefined) {
+    return normalizeCellValue(value.result);
+  }
+  if (value.hyperlink !== undefined && value.text !== undefined) {
+    return value.text;
+  }
+  if (Array.isArray(value.richText)) {
+    return value.richText.map((part) => part.text || '').join('');
+  }
+
+  return value.toString ? value.toString() : String(value);
+}
+
+function cellToString(value) {
+  const normalized = normalizeCellValue(value);
+  return normalized === null || normalized === undefined ? null : normalized.toString().trim();
+}
 const COLUMN_ALIASES = {
   reference_number: [
     'reference_number', 'reference number', 'ref_number', 'ref number',
     'ref_no', 'ref no', 'reference', 'ref', 'application_number',
-    'application number', 'candidate_id', 'candidate id',
+    'application number', 'application_no', 'application no', 'application no.',
+    'candidate_id', 'candidate id', 'candidate no', 'candidate no.',
   ],
   candidate_name: [
     'candidate_name', 'candidate name', 'name', 'full_name', 'full name',
@@ -98,9 +132,17 @@ function detectColumns(headers) {
  * @param {string} expectedPostingCode - The job's posting code (for validation)
  * @returns {Promise<{ rows: Object[], failedRows: Object[], warnings: string[], totalRows: number }>}
  */
-async function parseExcelBuffer(buffer, expectedPostingCode) {
+async function parseExcelBuffer(buffer, expectedPostingCode, fileName = 'Excel file') {
+  if (/\.xls$/i.test(fileName) && !/\.xlsx$/i.test(fileName)) {
+    throw new ValidationError('Legacy .xls files are not supported yet. Please save the workbook as .xlsx and upload again.');
+  }
+
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  try {
+    await workbook.xlsx.load(buffer);
+  } catch (error) {
+    throw new ValidationError(`Unable to read Excel workbook. Please upload a valid .xlsx file. (${error.message})`);
+  }
 
   const worksheet = workbook.worksheets[0];
   if (!worksheet) {
@@ -111,7 +153,7 @@ async function parseExcelBuffer(buffer, expectedPostingCode) {
   const headerRow = worksheet.getRow(1);
   const headers = [];
   headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    headers[colNumber - 1] = cell.value ? cell.value.toString() : '';
+    headers[colNumber - 1] = cellToString(cell.value) || '';
   });
 
   if (headers.length === 0) {
@@ -134,25 +176,22 @@ async function parseExcelBuffer(buffer, expectedPostingCode) {
 
     const rawData = {};
     row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      rawData[headers[colNumber - 1] || `col_${colNumber}`] = cell.value;
+      rawData[headers[colNumber - 1] || `col_${colNumber}`] = normalizeCellValue(cell.value);
     });
 
     // Extract mapped fields
-    const referenceNumberRaw = row.getCell(mapping.reference_number + 1).value;
-    const referenceNumber = referenceNumberRaw
-      ? referenceNumberRaw.toString().trim()
-      : null;
+    const referenceNumber = cellToString(row.getCell(mapping.reference_number + 1).value);
 
     const candidateName = mapping.candidate_name !== undefined
-      ? (row.getCell(mapping.candidate_name + 1).value?.toString().trim() || null)
+      ? cellToString(row.getCell(mapping.candidate_name + 1).value)
       : null;
 
     const candidateEmail = mapping.candidate_email !== undefined
-      ? (row.getCell(mapping.candidate_email + 1).value?.toString().trim() || null)
+      ? cellToString(row.getCell(mapping.candidate_email + 1).value)
       : null;
 
     const zipPath = mapping.zip_path !== undefined
-      ? (row.getCell(mapping.zip_path + 1).value?.toString().trim() || null)
+      ? cellToString(row.getCell(mapping.zip_path + 1).value)
       : null;
 
     // Validate reference number

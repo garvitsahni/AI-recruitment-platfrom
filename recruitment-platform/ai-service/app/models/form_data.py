@@ -111,6 +111,7 @@ class FormParseRequest(BaseModel):
 
     pdf_s3_key: str = Field(description="S3 key of the form PDF")
     reference_number: str = Field(description="Expected reference number for validation")
+    pdf_base64: Optional[str] = Field(default=None, description="Base64-encoded PDF bytes")
 
 
 class FormParseResponse(BaseModel):

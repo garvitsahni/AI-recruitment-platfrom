@@ -2,6 +2,7 @@
 
 const { prisma } = require('../lib/prisma');
 const aiService = require('./aiService');
+const storage = require('./storage');
 const { logger } = require('../utils/logger');
 const { logAuditEvent } = require('../middleware/auditLogger');
 
@@ -44,22 +45,46 @@ async function processApplication(applicationId) {
       (doc) => doc.fileType === 'APPLICATION_FORM' || doc.mimeType === 'application/pdf'
     );
 
+    const evidenceDocuments = [];
+    for (const doc of application.documents) {
+      if (doc.mimeType !== 'application/pdf') {
+        continue;
+      }
+
+      try {
+        const fileBuffer = await storage.download(doc.s3Key);
+        evidenceDocuments.push({
+          document_type: doc.fileType,
+          file_name: doc.fileName,
+          document_id: doc.id,
+          mime_type: doc.mimeType,
+          pdf_base64: fileBuffer.toString('base64'),
+        });
+      } catch (error) {
+        logger.warn({ applicationId, documentId: doc.id, s3Key: doc.s3Key, error: error.message }, 'Unable to load evidence document');
+      }
+    }
+
     let parsedFormData = null;
     let attachmentManifest = {
       attachments: application.documents.map((doc) => ({
+        document_type: doc.fileType,
         file_name: doc.fileName,
-        storage_key: doc.s3Key,
-        mime_type: doc.mimeType,
+        is_present: true,
       })),
     };
 
     if (formDocument) {
+      const formEvidence = evidenceDocuments.find((doc) => doc.document_id === formDocument.id);
       const parseResult = await aiService.parseFormPdf(
         formDocument.s3Key,
-        application.referenceNumber
+        application.referenceNumber,
+        formEvidence?.pdf_base64 || null
       );
       parsedFormData = parseResult.parsed_form_data;
-      attachmentManifest = parseResult.attachment_manifest || attachmentManifest;
+      attachmentManifest = parseResult.attachment_manifest?.attachments?.length
+        ? parseResult.attachment_manifest
+        : attachmentManifest;
 
       await prisma.application.update({
         where: { id: applicationId },
@@ -89,6 +114,7 @@ async function processApplication(applicationId) {
       checklistRules: rules,
       attachmentManifest,
       applicationId,
+      evidenceDocuments,
     });
 
     const verdictResult = await aiService.computeVerdict(checkResult.rule_results);

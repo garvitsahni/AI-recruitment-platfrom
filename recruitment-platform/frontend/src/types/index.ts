@@ -71,6 +71,7 @@ export interface RuleComplianceResults {
     experience: ComplianceCheck;
     marks: ComplianceCheck;
     documents: ComplianceCheck;
+    [ruleKey: string]: ComplianceCheck;
   };
 }
 

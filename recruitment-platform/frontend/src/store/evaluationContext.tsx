@@ -76,8 +76,22 @@ export const EvaluationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const getRuleKey = (rule: any): keyof Candidate['ruleCompliance']['checks'] => {
+    const source = `${rule.category || ''} ${rule.rule || ''}`.toLowerCase();
+    if (source.includes('age')) return 'age';
+    if (source.includes('qualification') || source.includes('education') || source.includes('degree')) return 'qualification';
+    if (source.includes('experience') || source.includes('employment')) return 'experience';
+    if (source.includes('mark') || source.includes('percentage')) return 'marks';
+    return 'documents';
+  };
+
+  const mapRuleStatus = (rule: any): 'PASS' | 'FAIL' => {
+    return rule.status === 'passed' && rule.citation_verified !== false ? 'PASS' : 'FAIL';
+  };
+
   const mapApplicationToCandidate = (app: any): Candidate => {
     const matchResult = app.matchResults?.[0];
+    const ruleResults = Array.isArray(matchResult?.ruleResults) ? matchResult.ruleResults : [];
     let status: CandidateStatus = 'PENDING';
     if (matchResult) {
       status = matchResult.verdict === 'eligible'
@@ -87,46 +101,87 @@ export const EvaluationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           : 'NEEDS_REVIEW';
     }
 
+    const checks: Candidate['ruleCompliance']['checks'] = {
+      age: { status: 'FAIL', required: 'Not checked', actual: 'No verified evidence', message: 'AI evaluation has not verified this rule yet.' },
+      qualification: { status: 'FAIL', required: 'Not checked', actual: 'No verified evidence', message: 'AI evaluation has not verified this rule yet.' },
+      experience: { status: 'FAIL', required: 'Not checked', actual: 'No verified evidence', message: 'AI evaluation has not verified this rule yet.' },
+      marks: { status: 'FAIL', required: 'Not checked', actual: 'No verified evidence', message: 'AI evaluation has not verified this rule yet.' },
+      documents: { status: 'FAIL', required: 'Required evidence documents', actual: app.documents?.length ? `${app.documents.length} document(s) uploaded` : 'No documents uploaded', message: 'Document evidence is checked during AI evaluation.' }
+    };
+
+    const evidenceValidations: Candidate['evidenceValidation']['validations'] = {};
+    const missingDocuments: string[] = [];
+
+    for (const [index, rule] of ruleResults.entries()) {
+      const baseKey = getRuleKey(rule);
+      const key = checks[baseKey].required === 'Not checked' ? baseKey : `${baseKey}_${index + 1}`;
+      const fieldName = String(key);
+      const passed = mapRuleStatus(rule);
+      const detailMessage = rule.verification_details?.reasoning || rule.verification_details?.error || 'No verification explanation returned.';
+      checks[key] = {
+        status: passed,
+        required: rule.rule,
+        actual: rule.value_found || rule.quoted_text || 'No verified claim found',
+        message: detailMessage,
+      };
+
+      evidenceValidations[key] = {
+        fieldName,
+        documentExists: rule.status !== 'missing_document',
+        pageExists: Boolean(rule.page),
+        textMatches: rule.citation_verified === true,
+        citedText: rule.quoted_text || '',
+        actualTextOnPage: rule.quoted_text || '',
+        status: passed,
+      };
+
+      if (rule.status === 'missing_document') {
+        missingDocuments.push(rule.rule);
+      }
+    }
+
+    const passedRules = ruleResults.filter((rule: any) => mapRuleStatus(rule) === 'PASS').length;
+    const matchScore = matchResult
+      ? Math.round((passedRules / Math.max(ruleResults.length, 1)) * 100)
+      : 0;
+
     return {
       id: app.id,
       name: app.candidateName || app.referenceNumber || 'Unknown Candidate',
       avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
-      matchScore: matchResult ? (status === 'ELIGIBLE' ? 95 : 50) : 0,
+      matchScore,
       status,
-      documents: app.documents?.map((d: any, i: number) => ({
+      documents: app.documents?.map((d: any) => ({
         id: d.id,
         fileName: d.fileName,
-        category: i === 0 ? 'Identity' : 'Academic',
+        category: d.fileType === 'IDENTITY_PROOF' ? 'Identity' : d.fileType === 'ACADEMIC_DOCUMENT' ? 'Academic' : d.fileType === 'EXPERIENCE_CERTIFICATE' ? 'Professional' : 'Supporting',
         exists: true,
         pagesCount: d.pageCount || 1,
-        rawTextByPage: { 1: 'Content preview unavailable' }
+        rawTextByPage: { 1: 'Document text is verified by the AI pipeline.' }
       })) || [],
       extractedData: {
-        name: toField(app.candidateName || app.referenceNumber || 'Unknown Candidate'),
-        dob: toField('01/01/1990'),
-        qualification: toField('B.Tech'),
-        branch: toField('CSE'),
-        university: toField('Unknown'),
-        passingYear: toField(2020),
-        percentage: toField(70),
-        experienceYears: toField(4),
-        employer: toField('Unknown'),
-        employmentPeriod: toField('Unknown'),
-        skills: toField<string[]>([])
+        name: toField(app.parsedFormData?.personal_info?.name || app.candidateName || app.referenceNumber || 'Unknown Candidate'),
+        dob: toField(app.parsedFormData?.personal_info?.date_of_birth || 'Not extracted'),
+        qualification: toField(app.parsedFormData?.education?.[0]?.qualification || 'Not extracted'),
+        branch: toField(app.parsedFormData?.education?.[0]?.subject || 'Not extracted'),
+        university: toField(app.parsedFormData?.education?.[0]?.board_university || 'Not extracted'),
+        passingYear: toField(app.parsedFormData?.education?.[0]?.year_of_passing || 0),
+        percentage: toField(Number.parseFloat(app.parsedFormData?.education?.[0]?.percentage_or_cgpa || '0')),
+        experienceYears: toField(app.parsedFormData?.work_experience?.[0]?.duration_years || 0),
+        employer: toField(app.parsedFormData?.work_experience?.[0]?.organization || 'Not extracted'),
+        employmentPeriod: toField(`${app.parsedFormData?.work_experience?.[0]?.from_date || ''} ${app.parsedFormData?.work_experience?.[0]?.to_date || ''}`.trim() || 'Not extracted'),
+        skills: toField<string[]>(app.parsedFormData?.technical_skills?.map((skill: any) => skill.skill_name).filter(Boolean) || [])
       },
-      evidenceValidation: { overallStatus: 'PASS', validations: {} },
+      evidenceValidation: {
+        overallStatus: Object.values(evidenceValidations).every(validation => validation.status === 'PASS') && Object.keys(evidenceValidations).length > 0 ? 'PASS' : 'FAIL',
+        validations: evidenceValidations
+      },
       ruleCompliance: {
         overallStatus: status === 'ELIGIBLE' ? 'PASS' : 'FAIL',
-        checks: {
-          age: { status: 'PASS', required: '', actual: '', message: '' },
-          qualification: { status: 'PASS', required: '', actual: '', message: '' },
-          experience: { status: 'PASS', required: '', actual: '', message: '' },
-          marks: { status: 'PASS', required: '', actual: '', message: '' },
-          documents: { status: 'PASS', required: '', actual: '', message: '' }
-        }
+        checks,
       },
       crossDocumentVerification: [],
-      missingDocuments: []
+      missingDocuments
     };
   };
 
@@ -233,9 +288,27 @@ export const EvaluationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (!job.checklistLocked) {
         const fallbackRules = [
-          { id: 'qualification', label: 'Qualification', requirement: currentJob?.qualification || 'B.Tech', type: 'text' },
-          { id: 'experience', label: 'Experience', requirement: `${currentJob?.minExperienceYears || 0}`, type: 'minimum_years' },
-          { id: 'marks', label: 'Marks', requirement: `${currentJob?.minPercentage || 0}`, type: 'minimum_percentage' },
+          {
+            rule_text: `Candidate must have ${currentJob?.qualification || 'B.Tech'} qualification`,
+            rule_type: 'hard',
+            category: 'qualification',
+            requires_document: true,
+            expected_document_type: 'ACADEMIC_DOCUMENT',
+          },
+          {
+            rule_text: `Candidate must have at least ${currentJob?.minExperienceYears || 0} years of experience`,
+            rule_type: 'hard',
+            category: 'experience',
+            requires_document: true,
+            expected_document_type: 'EXPERIENCE_CERTIFICATE',
+          },
+          {
+            rule_text: `Candidate must have at least ${currentJob?.minPercentage || 0}% marks`,
+            rule_type: 'hard',
+            category: 'marks',
+            requires_document: true,
+            expected_document_type: 'ACADEMIC_DOCUMENT',
+          },
         ];
         await api.post(`/jobs/${currentJobId}/lock-checklist`, { rules: fallbackRules });
       }

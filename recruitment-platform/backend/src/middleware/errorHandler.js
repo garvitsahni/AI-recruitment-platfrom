@@ -52,6 +52,15 @@ function errorHandler(err, req, res, _next) {
     });
   }
 
+  if (err.message && (err.message.startsWith('Only Excel files') || err.message.startsWith('Only ZIP files'))) {
+    return res.status(400).json({
+      error: {
+        code: 'INVALID_FILE_TYPE',
+        message: err.message,
+      },
+    });
+  }
+
   // Operational errors (expected) — return structured response
   if (err instanceof AppError && err.isOperational) {
     if (req.log) {

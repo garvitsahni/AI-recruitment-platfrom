@@ -305,13 +305,13 @@ export const CandidatePage: React.FC = () => {
             <div className="text-xs text-muted leading-relaxed font-semibold flex flex-col gap-3">
               <h3 className="font-extrabold text-foreground uppercase tracking-wider text-[10px]">Verification Audit Summary</h3>
               <p>
-                1. <strong className="text-foreground font-bold">Educational Verification:</strong> Academic qualifications parsed from Degree.pdf was successfully checked for degree equivalence (B.Tech) and marks cut-off validation.
+                1. <strong className="text-foreground font-bold">Educational Verification:</strong> {candidate.ruleCompliance.checks.qualification.message || 'No verified education explanation returned.'} Status: <strong className="text-foreground font-bold">{candidate.ruleCompliance.checks.qualification.status}</strong>.
               </p>
               <p>
-                2. <strong className="text-foreground font-bold">Identity & Age Verification:</strong> Candidate's Date of Birth was verified against Aadhaar Card. Aadhaar record validation reports PASS.
+                2. <strong className="text-foreground font-bold">Identity & Age Verification:</strong> {candidate.ruleCompliance.checks.age.message || 'No verified identity or age explanation returned.'} Status: <strong className="text-foreground font-bold">{candidate.ruleCompliance.checks.age.status}</strong>.
               </p>
               <p>
-                3. <strong className="text-foreground font-bold">Professional Experience Verification:</strong> Career details checked against submitted certificates. Experience letter verification results in: <strong className="text-foreground font-bold">{candidate.ruleCompliance.checks.experience.status}</strong>.
+                3. <strong className="text-foreground font-bold">Professional Experience Verification:</strong> {candidate.ruleCompliance.checks.experience.message || 'No verified experience explanation returned.'} Status: <strong className="text-foreground font-bold">{candidate.ruleCompliance.checks.experience.status}</strong>.
               </p>
               {candidate.crossDocumentVerification.length > 0 && (
                 <p className="text-warning">

@@ -87,12 +87,13 @@ async function extractChecklist(noticeText, jobId) {
  * @param {string} referenceNumber - Expected reference number
  * @returns {Promise<{ parsed_form_data: Object, attachment_manifest: Object }>}
  */
-async function parseFormPdf(pdfS3Key, referenceNumber) {
-  logger.info({ pdfS3Key, referenceNumber }, 'Requesting form PDF parsing');
+async function parseFormPdf(pdfS3Key, referenceNumber, pdfBase64 = null) {
+  logger.info({ pdfS3Key, referenceNumber, hasPdfBytes: Boolean(pdfBase64) }, 'Requesting form PDF parsing');
 
   const response = await client.post('/api/parse-form', {
     pdf_s3_key: pdfS3Key,
     reference_number: referenceNumber,
+    pdf_base64: pdfBase64,
   });
 
   return response.data;
@@ -110,14 +111,15 @@ async function parseFormPdf(pdfS3Key, referenceNumber) {
  * @param {string} params.applicationId - Application ID for correlation
  * @returns {Promise<{ rule_results: Object[] }>}
  */
-async function checkRules({ parsedFormData, checklistRules, attachmentManifest, applicationId }) {
-  logger.info({ applicationId, ruleCount: checklistRules.length }, 'Requesting rule checking');
+async function checkRules({ parsedFormData, checklistRules, attachmentManifest, applicationId, evidenceDocuments = [] }) {
+  logger.info({ applicationId, ruleCount: checklistRules.length, evidenceDocumentCount: evidenceDocuments.length }, 'Requesting rule checking');
 
   const response = await client.post('/api/check-rules', {
     parsed_form_data: parsedFormData,
     checklist_rules: checklistRules,
     attachment_manifest: attachmentManifest,
     application_id: applicationId,
+    evidence_documents: evidenceDocuments,
   });
 
   return response.data;
