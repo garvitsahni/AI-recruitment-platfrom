@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Candidate, CandidateDocument, FieldWithCitation } from '../types';
+import { Candidate, FieldWithCitation } from '../types';
 import { FileText, Eye, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Download } from 'lucide-react';
 
 interface DocumentViewerProps {
@@ -29,6 +29,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ candidate }) => 
       setActiveDocName(citation.fileName);
       setCurrentPage(citation.page);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedField]);
 
   // Find active document details

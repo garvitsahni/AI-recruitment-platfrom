@@ -157,7 +157,7 @@ class GoogleProvider(LLMProvider):
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.api_key)
-                self._model = genai.GenerativeModel("gemini-2.0-flash")
+                self._model = genai.GenerativeModel("gemini-2.5-flash")
             except ImportError:
                 raise RuntimeError("google-generativeai package not installed. Run: pip install google-generativeai")
         return self._model
@@ -186,7 +186,11 @@ class GoogleProvider(LLMProvider):
 
     async def health_check(self) -> bool:
         try:
-            self._get_model()
+            model = self._get_model()
+            await model.generate_content_async(
+                "ping",
+                generation_config={"temperature": 0.0, "max_output_tokens": 1},
+            )
             return True
         except Exception as e:
             logger.error("llm_health_check_failed", provider="google", error=str(e))

@@ -11,10 +11,12 @@ type UploadKey = 'applications' | 'jd';
 export const PipelineSteps: React.FC<PipelineStepsProps> = ({ onExportExcel }) => {
   const {
     isEvaluating,
+    isUploadingApplications,
     evaluationStep,
     applicationFileName,
     jdFileName,
-    markApplicationUploaded,
+    uploadSummary,
+    importApplications,
     markJdUploaded,
     startEvaluationPipeline
   } = useEvaluation();
@@ -22,37 +24,54 @@ export const PipelineSteps: React.FC<PipelineStepsProps> = ({ onExportExcel }) =
   const jdInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleFileChange = (key: UploadKey, file?: File) => {
+  const handleFileChange = async (key: UploadKey, file?: File) => {
     setUploadError(null);
     if (!file) return;
 
-    if (key === 'applications' && !file.name.toLowerCase().endsWith('.zip')) {
-      setUploadError('Upload applications as a .zip file.');
-      return;
-    }
-
-    if (key === 'jd' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setUploadError('Upload the job description as a .pdf file.');
-      return;
-    }
-
     if (key === 'applications') {
-      markApplicationUploaded(file.name);
+      const lowerFileName = file.name.toLowerCase();
+      const isZip = lowerFileName.endsWith('.zip');
+      const isExcel = lowerFileName.endsWith('.xlsx') || lowerFileName.endsWith('.xls');
+
+      if (!isZip && !isExcel) {
+        setUploadError('Upload applications as a .zip, .xlsx, or .xls file.');
+        return;
+      }
+
+      try {
+        await importApplications(file);
+      } catch (error) {
+        setUploadError(error instanceof Error ? error.message : 'Application upload failed.');
+      }
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setUploadError('Upload the job description as a .pdf file.');
       return;
     }
 
     markJdUploaded(file.name);
   };
 
-  const canEvaluate = Boolean(applicationFileName && jdFileName) && !isEvaluating;
+  const handleEvaluation = async () => {
+    setUploadError(null);
+    try {
+      await startEvaluationPipeline();
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'AI evaluation failed.');
+    }
+  };
 
-  const StatusLine = ({ complete, running }: { complete?: boolean; running?: boolean }) => {
+  const canEvaluate = Boolean(applicationFileName && jdFileName) && !isEvaluating && !isUploadingApplications;
+
+  const StatusLine = ({ complete, running, label }: { complete?: boolean; running?: boolean; label?: string }) => {
     if (!complete && !running) return null;
 
     return (
       <div className={`flex items-center gap-2 text-sm font-bold mt-6 ${complete ? 'text-success' : 'text-primary'}`}>
         {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-        {running ? 'AI Processing' : 'Verified'}
+        {label || (running ? 'Processing' : 'Verified')}
       </div>
     );
   };
@@ -72,29 +91,41 @@ export const PipelineSteps: React.FC<PipelineStepsProps> = ({ onExportExcel }) =
         </div>
       )}
 
+      {uploadSummary && (
+        <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-xs font-bold text-success">
+          {uploadSummary}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         <button
           type="button"
           onClick={() => applicationInputRef.current?.click()}
-          className="min-h-[260px] text-left rounded-xl border border-border bg-card p-8 flex flex-col items-start transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
+          disabled={isUploadingApplications}
+          className="min-h-[260px] text-left rounded-xl border border-border bg-card p-8 flex flex-col items-start transition-colors focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-70"
         >
           <input
             ref={applicationInputRef}
             type="file"
-            accept=".zip,application/zip,application/x-zip-compressed"
+            accept=".zip,.xlsx,.xls,application/zip,application/x-zip-compressed,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
             className="hidden"
-            onChange={(event) => handleFileChange('applications', event.target.files?.[0])}
+            onChange={(event) => {
+              void handleFileChange('applications', event.target.files?.[0]);
+              event.target.value = '';
+            }}
           />
           <div className="w-14 h-14 rounded-full bg-success/10 text-success flex items-center justify-center mb-6">
-            <Upload className="w-6 h-6" />
+            {isUploadingApplications ? <Loader2 className="w-6 h-6 animate-spin" /> : <Upload className="w-6 h-6" />}
           </div>
           <h3 className="font-serif font-black text-xl text-foreground">Upload Applications</h3>
-          <p className="text-sm text-muted font-medium mt-5 leading-7">
-            {applicationFileName || 'Candidates.zip'}
-            <br />
-            Applicants.xlsx
+          <p className="text-sm text-muted font-medium mt-5 leading-7 break-all">
+            {applicationFileName || 'Candidates.zip or Applicants.xlsx'}
           </p>
-          <StatusLine complete={Boolean(applicationFileName)} />
+          <StatusLine
+            complete={Boolean(applicationFileName) && !isUploadingApplications}
+            running={isUploadingApplications}
+            label={isUploadingApplications ? 'Uploading applications' : 'Imported'}
+          />
         </button>
 
         <button
@@ -107,13 +138,16 @@ export const PipelineSteps: React.FC<PipelineStepsProps> = ({ onExportExcel }) =
             type="file"
             accept=".pdf,application/pdf"
             className="hidden"
-            onChange={(event) => handleFileChange('jd', event.target.files?.[0])}
+            onChange={(event) => {
+              void handleFileChange('jd', event.target.files?.[0]);
+              event.target.value = '';
+            }}
           />
           <div className="w-14 h-14 rounded-full bg-success/10 text-success flex items-center justify-center mb-6">
             <FileText className="w-6 h-6" />
           </div>
           <h3 className="font-serif font-black text-xl text-foreground">Upload JD</h3>
-          <p className="text-sm text-muted font-medium mt-5 leading-7">
+          <p className="text-sm text-muted font-medium mt-5 leading-7 break-all">
             {jdFileName || 'Job_Description.pdf'}
           </p>
           <StatusLine complete={Boolean(jdFileName)} />
@@ -122,7 +156,7 @@ export const PipelineSteps: React.FC<PipelineStepsProps> = ({ onExportExcel }) =
         <button
           type="button"
           disabled={!canEvaluate}
-          onClick={() => startEvaluationPipeline()}
+          onClick={() => void handleEvaluation()}
           className="min-h-[260px] text-left rounded-xl border border-primary bg-card p-8 flex flex-col items-start transition-colors focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-70"
         >
           <div className="w-14 h-14 rounded-full bg-success/10 text-success flex items-center justify-center mb-6">
@@ -134,7 +168,7 @@ export const PipelineSteps: React.FC<PipelineStepsProps> = ({ onExportExcel }) =
             <br />
             Analyzing skills & experience
           </p>
-          <StatusLine running={isEvaluating} complete={evaluationStep >= 4} />
+          <StatusLine running={isEvaluating} complete={evaluationStep >= 4} label={isEvaluating ? 'AI processing' : 'Verified'} />
         </button>
 
         <button

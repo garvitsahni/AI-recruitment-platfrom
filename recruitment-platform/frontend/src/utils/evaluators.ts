@@ -13,7 +13,7 @@ export function parseDate(dateStr: string): Date | null {
   }
   
   // Try DD/MM/YYYY or DD-MM-YYYY
-  const parts = cleanStr.split(/[\/\-]/);
+  const parts = cleanStr.split(/[/-]/);
   if (parts.length === 3) {
     const day = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10) - 1; // 0-indexed month

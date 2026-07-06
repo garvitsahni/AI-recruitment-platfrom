@@ -9,22 +9,9 @@ const { ValidationError } = require('../utils/errors');
 
 /**
  * ZIP Import Service.
- *
- * Per PRD v3 FR-04: "A ZIP archive containing candidate application forms (PDFs)
- * and supporting documents. The system must extract the ZIP, map files to candidate rows...
- * and store them securely."
  */
-
-/**
- * Process a ZIP file stream and upload its contents to storage.
- *
- * @param {import('stream').Readable} zipStream - The ZIP file readable stream
- * @param {string} jobId - The job ID
- * @param {string} postingCode - The posting code for the job
- * @returns {Promise<{ uploadedFiles: Object[], failedFiles: Object[], totalExtracted: number }>}
- */
-async function processZipImport(zipStream, jobId, postingCode) {
-  logger.info({ jobId }, 'Starting ZIP import processing');
+async function processZipImport(zipStream, jobId, postingCode, archiveName = null) {
+  logger.info({ jobId, archiveName }, 'Starting ZIP import processing');
 
   const uploadedFiles = [];
   const failedFiles = [];
@@ -35,7 +22,7 @@ async function processZipImport(zipStream, jobId, postingCode) {
 
     for await (const entry of zip) {
       const fileName = entry.path;
-      const type = entry.type; // 'Directory' or 'File'
+      const type = entry.type;
 
       if (type === 'Directory' || fileName.startsWith('__MACOSX/') || fileName.includes('/.')) {
         entry.autodrain();
@@ -47,12 +34,7 @@ async function processZipImport(zipStream, jobId, postingCode) {
       const fileBaseName = path.basename(fileName);
 
       try {
-        // We will store all files under the job prefix.
-        // We do not map to the candidate yet, that will be done via matching the zip_path from Excel
         const storageKey = storage.generateKey('document', postingCode, `imports/${Date.now()}_${fileBaseName}`);
-
-        // Read the stream into a buffer because S3 client might need to know the length
-        // or we stream it directly. To be safe, we collect to buffer for small PDFs.
         const chunks = [];
         for await (const chunk of entry) {
           chunks.push(chunk);
@@ -62,11 +44,14 @@ async function processZipImport(zipStream, jobId, postingCode) {
         const uploadResult = await storage.upload(storageKey, buffer, mimeType, {
           jobId,
           originalName: fileName,
+          archiveName: archiveName || '',
         });
 
         uploadedFiles.push({
           originalPath: fileName,
+          archiveName,
           storageKey: uploadResult.key,
+          storageBucket: uploadResult.bucket,
           mimeType,
           size: buffer.length,
         });

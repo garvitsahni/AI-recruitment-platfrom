@@ -2,13 +2,14 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEvaluation } from '../../store/evaluationContext';
 import { PipelineSteps } from '../../components/PipelineSteps';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, FileSearch } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const {
     candidates,
     isEvaluating,
+    uploadSummary,
     setSelectedCandidateId
   } = useEvaluation();
 
@@ -42,6 +43,16 @@ export const DashboardPage: React.FC = () => {
             <div className="w-8 h-8 rounded-full border-4 border-primary border-t-transparent animate-spin" />
             <span className="text-xs font-bold text-muted">Running AI evaluation pipeline...</span>
           </div>
+        ) : candidates.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border bg-accent/40 px-6 py-10 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <FileSearch className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-bold text-foreground">No candidate output is available yet.</p>
+            <p className="mt-2 text-xs font-medium text-muted max-w-md mx-auto leading-6">
+              {uploadSummary || 'Upload an Excel application sheet or candidate ZIP above. Imported candidates will appear here automatically.'}
+            </p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {candidates.slice(0, 6).map((candidate, idx) => {
@@ -67,7 +78,7 @@ export const DashboardPage: React.FC = () => {
                     <div className="flex flex-col min-w-0">
                       <span className="font-bold text-xs text-foreground truncate">{candidate.name}</span>
                       <span className="text-[10px] text-muted font-medium truncate">
-                        {candidate.extractedData.experienceYears.value}+ Yrs Exp - {candidate.extractedData.skills.value.slice(0, 2).join(', ')}
+                        {candidate.extractedData.experienceYears.value}+ Yrs Exp - {candidate.extractedData.skills.value.slice(0, 2).join(', ') || 'Skills pending'}
                       </span>
                     </div>
                   </div>

@@ -4,8 +4,6 @@ import { useEvaluation } from '../../store/evaluationContext';
 import { DocumentViewer } from '../../components/DocumentViewer';
 import { 
   ArrowLeft, 
-  CheckCircle, 
-  XCircle, 
   AlertTriangle, 
   FileText, 
   Calendar, 
@@ -13,11 +11,7 @@ import {
   Briefcase, 
   CheckSquare, 
   Scale, 
-  Compass, 
-  Printer, 
-  Bookmark,
-  ChevronDown,
-  ChevronUp
+  Printer
 } from 'lucide-react';
 
 export const CandidatePage: React.FC = () => {

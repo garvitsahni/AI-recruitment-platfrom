@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useEvaluation } from '../../store/evaluationContext';
-import { Settings, Save, Trash2, CheckCircle, RefreshCcw, Sparkles } from 'lucide-react';
+import { Settings, Save, CheckCircle, RefreshCcw, Sparkles } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const { resetDatabase } = useEvaluation();

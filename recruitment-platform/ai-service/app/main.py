@@ -21,7 +21,13 @@ import time
 import uuid
 
 from app.config import settings
+from app.llm import get_provider
 from app.logging_config import configure_logging
+
+# In-memory cache for /ready health checks (avoids hitting Gemini on every poll)
+_READY_CACHE_TTL_SECONDS = 30
+_ready_cache_result: bool | None = None
+_ready_cache_timestamp: float = 0.0
 
 
 # Configure structured logging before anything else
@@ -143,10 +149,42 @@ async def health_check():
 @app.get("/ready")
 async def readiness_check():
     """
-    Readiness check — confirms the service is ready to accept work.
+    Readiness check — confirms the service can reach the configured LLM provider.
+
+    Uses a short TTL cache to avoid hitting the Gemini API on every ALB/Docker poll.
     """
-    # In future phases, this will check LLM provider connectivity
-    return {"status": "ready"}
+    global _ready_cache_result, _ready_cache_timestamp
+
+    now = time.time()
+    if _ready_cache_result is not None and (now - _ready_cache_timestamp) < _READY_CACHE_TTL_SECONDS:
+        if _ready_cache_result:
+            return {"status": "ready", "llm_provider": settings.llm_provider}
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "reason": "llm_unreachable", "llm_provider": settings.llm_provider},
+        )
+
+    try:
+        provider = get_provider()
+    except ValueError as exc:
+        _ready_cache_result = False
+        _ready_cache_timestamp = now
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "reason": "llm_provider_misconfigured", "detail": str(exc)},
+        )
+
+    healthy = await provider.health_check()
+    _ready_cache_result = healthy
+    _ready_cache_timestamp = now
+
+    if not healthy:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "reason": "llm_unreachable", "llm_provider": settings.llm_provider},
+        )
+
+    return {"status": "ready", "llm_provider": settings.llm_provider}
 
 
 # ============================================================================

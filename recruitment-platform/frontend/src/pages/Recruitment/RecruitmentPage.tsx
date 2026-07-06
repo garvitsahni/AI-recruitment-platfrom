@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useEvaluation } from '../../store/evaluationContext';
-import { FileText, Save, CheckCircle, HelpCircle, Edit2, AlertCircle } from 'lucide-react';
+import { FileText, Save, CheckCircle, Edit2, AlertCircle } from 'lucide-react';
 
 export const RecruitmentPage: React.FC = () => {
   const { currentJob, updateJobRequirements } = useEvaluation();

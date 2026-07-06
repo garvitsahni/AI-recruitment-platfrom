@@ -4,18 +4,13 @@ import { useEvaluation } from '../../store/evaluationContext';
 import { 
   History, 
   Search, 
-  Filter, 
-  Download, 
   ArrowRight, 
-  CheckCircle, 
-  AlertTriangle, 
-  XCircle,
   FileSpreadsheet
 } from 'lucide-react';
 
 export const ReportsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { candidates, runs, jobs, currentJob } = useEvaluation();
+  const { candidates, runs, jobs } = useEvaluation();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ELIGIBLE' | 'NOT_ELIGIBLE' | 'NEEDS_REVIEW'>('ALL');
 
