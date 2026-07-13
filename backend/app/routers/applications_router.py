@@ -105,19 +105,27 @@ async def import_applications(
             .first()
         )
         if existing:
+            # Backfill rich data if it was missing from a prior import
+            if not existing.parsed_form_data and c.get("parsed_form_data"):
+                existing.parsed_form_data = c["parsed_form_data"]
+            if not existing.resume_path and c.get("cv_url"):
+                existing.resume_path = c["cv_url"]
             continue
+
         app_row = models.Application(
             job_id=job_id,
             reference_number=c["reference_number"],
             candidate_name=c["candidate_name"],
             candidate_email=c["candidate_email"],
             status="PENDING",
+            parsed_form_data=c.get("parsed_form_data"),
+            resume_path=c.get("cv_url"),
         )
         db.add(app_row)
         created.append(app_row)
 
     db.commit()
-    return {"imported": len(created)}
+    return {"imported": len(created), "total": len(candidates)}
 
 
 @router.post("/jobs/{job_id}/applications/import-zip")
@@ -179,6 +187,36 @@ def evaluate(
 
     db.refresh(app_row)
     return {"application": _application_public(app_row), "matchResult": _match_result_public(match)}
+
+
+@router.post("/jobs/{job_id}/applications/re-evaluate-all")
+def re_evaluate_all(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """
+    Resets all applications for a job back to PENDING and clears old match results
+    so they can be re-evaluated through the pipeline. This is useful when pipeline
+    logic has been updated and old results need to be refreshed.
+    """
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail={"error": {"message": "Job not found"}})
+
+    apps = db.query(models.Application).filter(models.Application.job_id == job_id).all()
+    reset_count = 0
+    for app_row in apps:
+        # Clear old match results
+        for mr in list(app_row.match_results):
+            db.delete(mr)
+        # Reset status so frontend will re-trigger evaluation
+        app_row.status = "PENDING"
+        app_row.resume_text = None  # Force re-download / re-extraction
+        reset_count += 1
+
+    db.commit()
+    return {"reset": reset_count}
 
 
 @router.post("/applications/{application_id}/override")

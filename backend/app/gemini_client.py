@@ -80,6 +80,7 @@ def generate_json(system_instruction: str, user_prompt: str, max_retries: int = 
 
     last_err = None
     prompt = user_prompt
+    import time
     for attempt in range(max_retries + 1):
         try:
             response = model.generate_content(prompt)
@@ -88,11 +89,16 @@ def generate_json(system_instruction: str, user_prompt: str, max_retries: int = 
         except Exception as exc:  # noqa: BLE001 - want to catch parse + API errors alike
             last_err = exc
             logger.warning("Gemini call failed (attempt %s): %s", attempt + 1, exc)
-            prompt = (
-                user_prompt
-                + "\n\nIMPORTANT: Your previous response could not be parsed as valid JSON. "
-                  "Return ONLY a single valid JSON object/array, with no markdown fences and no commentary."
-            )
+            if "429" in str(exc) or "Quota exceeded" in str(exc):
+                # Rate limit hit. Backoff for 15s to reset the per-minute quota
+                logger.warning("Rate limit hit, sleeping 15s before retry...")
+                time.sleep(15)
+            else:
+                prompt = (
+                    user_prompt
+                    + "\n\nIMPORTANT: Your previous response could not be parsed as valid JSON. "
+                      "Return ONLY a single valid JSON object/array, with no markdown fences and no commentary."
+                )
 
     logger.warning("Gemini did not return parseable JSON after retries; falling back to empty data: %s", last_err)
     return {}

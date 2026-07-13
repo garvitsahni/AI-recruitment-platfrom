@@ -13,7 +13,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { getJobProfiles, getCandidates, processBulkUpload } from '../services/api';
+import { getJobProfiles, getCandidates, processBulkUpload, reEvaluateAll } from '../services/api';
 
 function CriteriaBreakdown({ result }) {
   const entries = Object.entries(result);
@@ -131,6 +131,7 @@ export default function BulkScreening() {
   const [candidates, setCandidates] = useState([]);
   const [filter, setFilter] = useState('All');
   const [expandedRow, setExpandedRow] = useState(null);
+  const [reEvaluating, setReEvaluating] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -168,7 +169,7 @@ export default function BulkScreening() {
   async function handleProcess() {
     if (!selectedProfileId || !zipFile || !excelFile) return;
     setProcessing(true);
-    setProgress({ current: 0, total: 142 });
+    setProgress({ current: 0, total: 0 });
 
     await processBulkUpload(selectedProfileId, zipFile, excelFile, (current, total) => {
       setProgress({ current, total });
@@ -176,6 +177,21 @@ export default function BulkScreening() {
 
     setProcessing(false);
     setProcessed(true);
+  }
+
+  async function handleReEvaluate() {
+    if (!selectedProfileId) return;
+    setReEvaluating(true);
+    setProgress({ current: 0, total: candidates.length });
+    
+    await reEvaluateAll(selectedProfileId, (current, total) => {
+      setProgress({ current, total });
+    });
+    
+    setReEvaluating(false);
+    // Reload candidates
+    const data = await getCandidates(selectedProfileId, filter);
+    setCandidates(data);
   }
 
   const eligibleCount = candidates.filter((c) => c.screeningStatus === 'Eligible').length;
@@ -266,13 +282,13 @@ export default function BulkScreening() {
                   <div className="progress-bar-header">
                     <span className="progress-bar-label">Processing candidates...</span>
                     <span className="progress-bar-value">
-                      {progress.current} of {progress.total}
+                      {progress.total === 0 ? 'Uploading...' : `${progress.current} of ${progress.total}`}
                     </span>
                   </div>
                   <div className="progress-bar-track">
                     <div
                       className="progress-bar-fill"
-                      style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                      style={{ width: progress.total > 0 ? `${(progress.current / progress.total) * 100}%` : '0%' }}
                     />
                   </div>
                 </div>
@@ -324,8 +340,18 @@ export default function BulkScreening() {
 
           {/* Results Table */}
           <div className="data-table-container">
-            <div className="data-table-header">
-              <h3 className="card-title">Screening Results</h3>
+            <div className="data-table-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+                <h3 className="card-title" style={{ margin: 0 }}>Screening Results</h3>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleReEvaluate}
+                  disabled={reEvaluating}
+                >
+                  <Play size={14} />
+                  {reEvaluating ? `Re-evaluating (${progress.current}/${progress.total})...` : 'Re-evaluate All'}
+                </button>
+              </div>
               <div className="data-table-filters">
                 {['All', 'Eligible', 'Needs Manual Review'].map((f) => (
                   <button

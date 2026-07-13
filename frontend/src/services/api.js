@@ -497,34 +497,41 @@ export async function processBulkUpload(jobProfileId, zipFile, excelFile, onProg
     return { total: 0, eligible: 0, needsReview: 0 };
   }
 
-  // 4. Trigger AI evaluation pipeline for all newly imported candidates
-  const triggerPromises = apps
-    .filter(app => app.status === 'PENDING')
-    .map(app => 
+  // 4. Trigger AI evaluation pipeline staggered to avoid Gemini rate limits (15 RPM)
+  const pendingApps = apps.filter(app => app.status === 'PENDING');
+  (async () => {
+    for (const app of pendingApps) {
       request(`/api/applications/${app.id}/evaluate`, { method: 'POST' }).catch(err => {
         console.error(`Error initiating evaluation for app ${app.id}:`, err);
-      })
-    );
-  await Promise.all(triggerPromises);
+      });
+      // Free tier is ~15 RPM, so wait 4.5 seconds between requests
+      await new Promise(resolve => setTimeout(resolve, 4500));
+    }
+  })();
 
   // 5. Poll evaluation status to update progress bar
   const total = apps.length;
   let evaluatedCount = 0;
-  
-  while (evaluatedCount < total) {
+  const MAX_POLL_ATTEMPTS = 600; // 15 minutes max
+
+  let pollAttempts = 0;
+  while (evaluatedCount < total && pollAttempts < MAX_POLL_ATTEMPTS) {
     await new Promise(resolve => setTimeout(resolve, 1500));
     appRes = await request(`/api/jobs/${jobProfileId}/applications?limit=100`);
     apps = appRes.applications || [];
-    
+
     evaluatedCount = apps.filter(
       app => app.status === 'EVALUATED' || app.status === 'FAILED_EVALUATION'
     ).length;
-    
+
     onProgress?.(evaluatedCount, total);
+    pollAttempts += 1;
+
+    if (evaluatedCount >= total) break;
   }
 
-  const eligible = apps.filter(app => app.matchResults[0]?.verdict === 'eligible').length;
-  const needsReview = apps.filter(app => app.matchResults[0]?.verdict === 'semi_eligible').length;
+  const eligible = apps.filter(app => (app.matchResults || [])[0]?.verdict === 'eligible').length;
+  const needsReview = apps.filter(app => (app.matchResults || [])[0]?.verdict === 'semi_eligible').length;
 
   return {
     total,
@@ -532,6 +539,60 @@ export async function processBulkUpload(jobProfileId, zipFile, excelFile, onProg
     needsReview
   };
 }
+
+export async function reEvaluateAll(jobProfileId, onProgress) {
+  // 1. Reset all candidates to PENDING
+  await request(`/api/jobs/${jobProfileId}/applications/re-evaluate-all`, { method: 'POST' });
+
+  // 2. Fetch applications
+  let appRes = await request(`/api/jobs/${jobProfileId}/applications?limit=100`);
+  let apps = appRes.applications || [];
+
+  if (apps.length === 0) {
+    return { total: 0, eligible: 0, needsReview: 0 };
+  }
+
+  // 3. Trigger evaluation for all newly reset candidates, staggered to avoid rate limits
+  (async () => {
+    for (const app of apps) {
+      request(`/api/applications/${app.id}/evaluate`, { method: 'POST' }).catch(err => {
+        console.error(`Error initiating evaluation for app ${app.id}:`, err);
+      });
+      await new Promise(resolve => setTimeout(resolve, 4500));
+    }
+  })();
+
+  // 4. Poll evaluation status to update progress bar
+  const total = apps.length;
+  let evaluatedCount = 0;
+  const MAX_POLL_ATTEMPTS = 600; // 15 minutes max
+
+  let pollAttempts = 0;
+  while (evaluatedCount < total && pollAttempts < MAX_POLL_ATTEMPTS) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    appRes = await request(`/api/jobs/${jobProfileId}/applications?limit=100`);
+    apps = appRes.applications || [];
+
+    evaluatedCount = apps.filter(
+      app => app.status === 'EVALUATED' || app.status === 'FAILED_EVALUATION'
+    ).length;
+
+    onProgress?.(evaluatedCount, total);
+    pollAttempts += 1;
+
+    if (evaluatedCount >= total) break;
+  }
+
+  const eligible = apps.filter(app => (app.matchResults || [])[0]?.verdict === 'eligible').length;
+  const needsReview = apps.filter(app => (app.matchResults || [])[0]?.verdict === 'semi_eligible').length;
+
+  return {
+    total,
+    eligible,
+    needsReview
+  };
+}
+
 
 export async function updateCandidateStatus(candidateId, status, notes) {
   const verdict = status === 'Eligible' ? 'eligible' : 'not_eligible';
