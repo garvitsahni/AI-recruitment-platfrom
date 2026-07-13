@@ -1,0 +1,106 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy-production" to confirm'
+        required: true
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  ECS_CLUSTER: recruitment-production
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
+
+jobs:
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate manual trigger confirmation
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "deploy-production" ]; then
+            echo "❌ Confirmation failed. You must type 'deploy-production' to proceed."
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: production
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Pull production secrets
+        run: |
+          DB_URL=$(aws secretsmanager get-secret-value --secret-id recruitment/production/database-url --query SecretString --output text)
+          echo "::add-mask::$DB_URL"
+          echo "DATABASE_URL=$DB_URL" >> $GITHUB_ENV
+
+      - name: Run Prisma migrations
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      - name: Deploy all services to ECS
+        run: |
+          for SERVICE in recruitment-backend recruitment-ai-service recruitment-frontend; do
+            aws ecs update-service \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --service $SERVICE \
+              --force-new-deployment
+          done
+
+      - name: Wait for deployment stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services recruitment-backend recruitment-ai-service recruitment-frontend
+        timeout-minutes: 15
+
+      - name: Production smoke tests
+        run: |
+          PROD_URL="${{ secrets.PRODUCTION_URL }}"
+          curl -f "${PROD_URL}:3001/health" || exit 1
+          curl -f "${PROD_URL}:8000/health" || exit 1
+          echo "Production smoke tests passed"
